@@ -42,13 +42,16 @@ def one_call(i: int, base: str) -> str:
     with httpx.Client(base_url=base, timeout=30) as c:
         tool_call(c, call, "qualify_lead", {"need": signals["need"]})  # partial info first, like a real call
         res = tool_call(c, call, "qualify_lead", signals)
-        if res.get("status") == "qualified":
+        outcome = res.get("status", "error")
+        if outcome == "qualified":
             tool_call(c, call, "get_available_slots", {})
-            tool_call(c, call, "book_meeting", {"name": f"Sim {i}", "email": f"sim{i}@example.com"})
+            booking = tool_call(c, call, "book_meeting", {"name": f"Sim {i}", "email": f"sim{i}@example.com"})
+            if booking.get("booked"):
+                outcome = "booked"  # summary must describe how the call ended, not the qualify step
         c.post("/vapi/webhook", headers=HEADERS, json={"message": {
             "type": "end-of-call-report", "call": call, "durationSeconds": random.randint(45, 240),
-            "analysis": {"summary": f"Simulated lead -> {res.get('status')}"}}}).raise_for_status()
-    return res.get("status", "error")
+            "analysis": {"summary": f"Simulated lead -> {outcome}"}}}).raise_for_status()
+    return outcome
 
 
 def main() -> None:
