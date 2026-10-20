@@ -41,9 +41,10 @@ export default async function Dashboard() {
     ["Cost reduction", m.live.savings_pct == null ? "—" : `${m.live.savings_pct}%`, true],
     ["Live calls", m.live.calls],
     ["Booked rate (live)", pct(m.live.booked_rate)],
-    ["Tool p50 / p95", `${ms(m.tool_latency_ms.live.p50)} / ${ms(m.tool_latency_ms.live.p95)}`],
+    ["Tool p50 / p95 (live)", `${ms(m.tool_latency_ms.live.p50)} / ${ms(m.tool_latency_ms.live.p95)}`],
     ["WhatsApp convos", m.whatsapp_conversations],
     ["Load-test calls", m.simulated.calls],
+    ["Tool p50 / p95 (load test)", `${ms(m.tool_latency_ms.simulated.p50)} / ${ms(m.tool_latency_ms.simulated.p95)}`],
   ];
 
   return (
