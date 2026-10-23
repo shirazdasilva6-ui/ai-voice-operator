@@ -49,8 +49,13 @@ def webhook(payload: dict, x_vapi_secret: str | None = Header(default=None)):
 @router.get("/assistant-config")
 def assistant_config(business: str = "Acme Growth"):
     """Vapi assistant definition generated from the same tool registry the WhatsApp agent uses."""
+    return build_assistant(business, secret="<VAPI_SECRET>")
+
+
+def build_assistant(business: str, secret: str, customer_id: str | None = None) -> dict:
     s = get_settings()
-    server = {"url": f"{s.public_base_url}/vapi/webhook", "secret": "<VAPI_SECRET>"}
+    url = f"{s.public_base_url}/vapi/webhook" + (f"?customer={customer_id}" if customer_id else "")
+    server = {"url": url, "secret": secret}
     return {
         "name": f"{business} Operator",
         "firstMessage": FIRST_MESSAGE.format(business=business),
