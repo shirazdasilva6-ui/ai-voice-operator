@@ -28,6 +28,18 @@ class Settings(BaseSettings):
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
     stripe_price_id: str = ""
+    # Per-country monthly price and one-off setup price, as JSON: {"US": "price_...", "GB": "price_..."}
+    stripe_price_ids: dict[str, str] = {}
+    stripe_setup_price_ids: dict[str, str] = {}
+
+    vapi_api_key: str = ""
+    # Twilio regulatory bundle + address per country, required to buy GB/AU numbers: {"GB": "BU..."}
+    twilio_bundle_sids: dict[str, str] = {}
+    twilio_address_sids: dict[str, str] = {}
+
+    resend_api_key: str = ""
+    resend_from: str = "Voice Operator <onboarding@example.com>"
+    ops_email: str = ""
 
     human_cost_per_call: float = 7.00
 
