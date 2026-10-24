@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import random
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
@@ -54,6 +55,20 @@ def one_call(i: int, base: str) -> str:
     return outcome
 
 
+def wait_until_ready(base: str, timeout_s: float = 60) -> None:
+    """A container can be 'started' before uvicorn accepts connections; poll /health instead of crashing."""
+    deadline = time.monotonic() + timeout_s
+    while True:
+        try:
+            if httpx.get(f"{base}/health", timeout=2).status_code == 200:
+                return
+        except httpx.TransportError:
+            pass
+        if time.monotonic() > deadline:
+            raise SystemExit(f"API at {base} not ready after {timeout_s:.0f}s")
+        time.sleep(1)
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--n", type=int, default=800)
@@ -61,6 +76,7 @@ def main() -> None:
     p.add_argument("--workers", type=int, default=16)
     a = p.parse_args()
 
+    wait_until_ready(a.base)
     with ThreadPoolExecutor(a.workers) as ex:
         outcomes = list(ex.map(lambda i: one_call(i, a.base), range(a.n)))
     print({k: outcomes.count(k) for k in set(outcomes)})
