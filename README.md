@@ -94,6 +94,36 @@ docker-compose exec api python -m scripts.simulate_calls --n 800
 docker-compose exec api pytest -q
 ```
 
+### Try it by hand (be Vapi yourself)
+
+Send the same webhook Vapi sends during a call. Use a call id starting with `sim-`, otherwise your test counts as a live call (and with real keys it would create a HubSpot contact).
+
+```bash
+curl -s -X POST localhost:8000/vapi/webhook -H 'Content-Type: application/json' -d '{
+  "message": {"type": "tool-calls",
+    "call": {"id": "sim-manual-1", "customer": {"number": "+15559990001"}},
+    "toolCallList": [{"id": "t1", "function": {"name": "qualify_lead",
+      "arguments": {"budget_usd": 8000, "is_decision_maker": true,
+                    "need": "We miss calls after hours", "timeline_days": 14}}}]}}'
+```
+
+PowerShell (`curl` there is an alias for something else):
+
+```powershell
+$body = @{ message = @{ type = "tool-calls"
+  call = @{ id = "sim-manual-1"; customer = @{ number = "+15559990001" } }
+  toolCallList = @(@{ id = "t1"; function = @{ name = "qualify_lead"; arguments = @{ budget_usd = 500 } } }) } } | ConvertTo-Json -Depth 10
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/vapi/webhook -ContentType 'application/json' -Body $body
+```
+
+| You send | `result` you get back | Why |
+|---|---|---|
+| `budget_usd: 500` | `"status": "disqualified"` | Below the $1,000 floor in `qualify.py`, so no need to ask more |
+| `budget_usd: 8000` only | `"status": "needs_info"` + the 3 missing fields | The model is told which questions to ask next |
+| All four fields, strong values | `"status": "qualified", "score": 100` | Next the agent offers slots and calls `book_meeting` |
+| `book_meeting` before qualifying | `"error": "Lead is not qualified. Do not book."` | Code, not the model, decides who gets booked |
+| Any request with a wrong `x-vapi-secret` (when `VAPI_SECRET` is set) | HTTP 401 | Webhook authentication |
+
 ### Connect real phone and WhatsApp
 
 1. `ngrok http 8000`, then set `PUBLIC_BASE_URL` to the ngrok URL.
