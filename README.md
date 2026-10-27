@@ -34,7 +34,7 @@ Every number below comes from `GET /metrics`, which reads the `calls` and `tool_
 3. **Books.** Qualified leads get real open slots from the Calendly API. A single-use booking link goes out by SMS for voice callers or in the chat for WhatsApp.
 4. **Logs.** Every lead is upserted into HubSpot (search by phone, then create or patch) with `hs_lead_status` mapped from the pipeline state.
 5. **Bills.** The business owner subscribes through Stripe Checkout, and the webhook syncs subscription status.
-6. **Reports.** A Next.js 14 dashboard shows volume, cost per call, latency, booking rate and recent calls (phone numbers masked).
+6. **Reports.** A Next.js 16 dashboard shows volume, cost per call, latency, booking rate and recent calls (phone numbers masked).
 
 ## Architecture
 
@@ -51,7 +51,7 @@ flowchart LR
   API --> SMS[Twilio SMS]
   API --> DB[(Postgres / Supabase)]
   Stripe -->|signed webhook| API
-  Web[Next.js 14 dashboard] -->|/metrics /calls| API
+  Web[Next.js 16 dashboard] -->|/metrics /calls| API
 ```
 
 ```
@@ -67,7 +67,7 @@ ai-voice-operator/
 │   │   └── routes/           vapi · whatsapp · metrics · billing
 │   ├── scripts/simulate_calls.py
 │   └── tests/test_qualify.py
-└── web/                      Next.js 14 dashboard
+└── web/                      Next.js 16 dashboard
 ```
 
 ### Design decisions
@@ -135,7 +135,7 @@ Invoke-RestMethod -Method Post -Uri http://localhost:8000/vapi/webhook -ContentT
 
 ## Stack
 
-Next.js 14 · FastAPI · Postgres (Supabase in prod) · Twilio Voice / SMS / WhatsApp · Vapi · Claude tool use · Calendly API · HubSpot CRM API · Stripe Billing · Docker
+Next.js 16 · FastAPI · Postgres (Supabase in prod) · Twilio Voice / SMS / WhatsApp · Vapi · Claude tool use · Calendly API · HubSpot CRM API · Stripe Billing · Docker
 
 ## Roadmap
 
