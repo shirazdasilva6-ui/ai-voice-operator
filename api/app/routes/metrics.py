@@ -1,9 +1,11 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from ..config import get_settings
 from ..db import conn
+from ..security import require_dashboard_token
 
-router = APIRouter(tags=["metrics"])
+# Call summaries and business metrics: never public.
+router = APIRouter(tags=["metrics"], dependencies=[Depends(require_dashboard_token)])
 
 
 def _bucket(row: dict | None, human_cost: float) -> dict:

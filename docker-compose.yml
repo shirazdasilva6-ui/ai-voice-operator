@@ -28,6 +28,7 @@ services:
     build: ./web
     environment:
       API_URL: http://api:8000
+      DASHBOARD_TOKEN: ${DASHBOARD_TOKEN:-}   # same token as the API, read server-side only
     depends_on: [api]
     ports: ["3000:3000"]
 

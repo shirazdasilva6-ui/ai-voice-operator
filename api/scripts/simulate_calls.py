@@ -80,7 +80,8 @@ def main() -> None:
     with ThreadPoolExecutor(a.workers) as ex:
         outcomes = list(ex.map(lambda i: one_call(i, a.base), range(a.n)))
     print({k: outcomes.count(k) for k in set(outcomes)})
-    print(httpx.get(f"{a.base}/metrics").json())
+    token = os.getenv("DASHBOARD_TOKEN")
+    print(httpx.get(f"{a.base}/metrics", headers={"Authorization": f"Bearer {token}"} if token else {}).json())
 
 
 if __name__ == "__main__":
