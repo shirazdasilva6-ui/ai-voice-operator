@@ -23,8 +23,14 @@ type Call = {
   score: number | null;
 };
 
+// Server-only (no NEXT_PUBLIC_ prefix), so the token never reaches the browser.
+const TOKEN = process.env.DASHBOARD_TOKEN;
+
 async function get<T>(path: string): Promise<T> {
-  const r = await fetch(`${API}${path}`, { cache: "no-store" });
+  const r = await fetch(`${API}${path}`, {
+    cache: "no-store",
+    headers: TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {},
+  });
   if (!r.ok) throw new Error(`${path} -> ${r.status}`);
   return r.json();
 }

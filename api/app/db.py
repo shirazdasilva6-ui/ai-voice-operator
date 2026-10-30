@@ -15,8 +15,17 @@ def conn():
         yield c
 
 
+LEAD_COLUMNS = {
+    "name", "email", "company", "budget_usd", "is_decision_maker", "need",
+    "timeline_days", "score", "status", "hubspot_id", "booking_url",
+}
+
+
 def upsert_lead(phone: str, **fields) -> dict:
     fields = {k: v for k, v in fields.items() if v is not None}
+    # Column names are interpolated into SQL (values never are), so only known columns may get through.
+    if unknown := set(fields) - LEAD_COLUMNS:
+        raise ValueError(f"unknown lead columns: {sorted(unknown)}")
     cols = ["phone", *fields]
     updates = ", ".join(f"{k} = excluded.{k}" for k in fields) or "phone = excluded.phone"
     with conn() as c:
