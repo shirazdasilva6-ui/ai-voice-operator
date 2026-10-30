@@ -34,7 +34,7 @@ Every number below comes from `GET /metrics`, which reads the `calls` and `tool_
 3. **Books.** Qualified leads get real open slots from the Calendly API. A single-use booking link goes out by SMS for voice callers or in the chat for WhatsApp.
 4. **Logs.** Every lead is upserted into HubSpot (search by phone, then create or patch) with `hs_lead_status` mapped from the pipeline state.
 5. **Bills.** The business owner subscribes through Stripe Checkout, and the webhook syncs subscription status.
-6. **Reports.** A Next.js 14 dashboard shows volume, cost per call, latency, booking rate and recent calls (phone numbers masked).
+6. **Reports.** A Next.js 16 dashboard shows volume, cost per call, latency, booking rate and recent calls (phone numbers masked).
 
 ## Architecture
 
@@ -51,7 +51,7 @@ flowchart LR
   API --> SMS[Twilio SMS]
   API --> DB[(Postgres / Supabase)]
   Stripe -->|signed webhook| API
-  Web[Next.js 14 dashboard] -->|/metrics /calls| API
+  Web[Next.js 16 dashboard] -->|/metrics /calls| API
 ```
 
 ```
@@ -67,7 +67,7 @@ ai-voice-operator/
 │   │   └── routes/           vapi · whatsapp · metrics · billing
 │   ├── scripts/simulate_calls.py
 │   └── tests/test_qualify.py
-└── web/                      Next.js 14 dashboard
+└── web/                      Next.js 16 dashboard
 ```
 
 ### Design decisions
@@ -94,6 +94,36 @@ docker-compose exec api python -m scripts.simulate_calls --n 800
 docker-compose exec api pytest -q
 ```
 
+### Try it by hand (be Vapi yourself)
+
+Send the same webhook Vapi sends during a call. Use a call id starting with `sim-`, otherwise your test counts as a live call (and with real keys it would create a HubSpot contact).
+
+```bash
+curl -s -X POST localhost:8000/vapi/webhook -H 'Content-Type: application/json' -d '{
+  "message": {"type": "tool-calls",
+    "call": {"id": "sim-manual-1", "customer": {"number": "+15559990001"}},
+    "toolCallList": [{"id": "t1", "function": {"name": "qualify_lead",
+      "arguments": {"budget_usd": 8000, "is_decision_maker": true,
+                    "need": "We miss calls after hours", "timeline_days": 14}}}]}}'
+```
+
+PowerShell (`curl` there is an alias for something else):
+
+```powershell
+$body = @{ message = @{ type = "tool-calls"
+  call = @{ id = "sim-manual-1"; customer = @{ number = "+15559990001" } }
+  toolCallList = @(@{ id = "t1"; function = @{ name = "qualify_lead"; arguments = @{ budget_usd = 500 } } }) } } | ConvertTo-Json -Depth 10
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/vapi/webhook -ContentType 'application/json' -Body $body
+```
+
+| You send | `result` you get back | Why |
+|---|---|---|
+| `budget_usd: 500` | `"status": "disqualified"` | Below the $1,000 floor in `qualify.py`, so no need to ask more |
+| `budget_usd: 8000` only | `"status": "needs_info"` + the 3 missing fields | The model is told which questions to ask next |
+| All four fields, strong values | `"status": "qualified", "score": 100` | Next the agent offers slots and calls `book_meeting` |
+| `book_meeting` before qualifying | `"error": "Lead is not qualified. Do not book."` | Code, not the model, decides who gets booked |
+| Any request with a wrong `x-vapi-secret` (when `VAPI_SECRET` is set) | HTTP 401 | Webhook authentication |
+
 ### Connect real phone and WhatsApp
 
 1. `ngrok http 8000`, then set `PUBLIC_BASE_URL` to the ngrok URL.
@@ -105,7 +135,7 @@ docker-compose exec api pytest -q
 
 ## Stack
 
-Next.js 14 · FastAPI · Postgres (Supabase in prod) · Twilio Voice / SMS / WhatsApp · Vapi · Claude tool use · Calendly API · HubSpot CRM API · Stripe Billing · Docker
+Next.js 16 · FastAPI · Postgres (Supabase in prod) · Twilio Voice / SMS / WhatsApp · Vapi · Claude tool use · Calendly API · HubSpot CRM API · Stripe Billing · Docker
 
 ## Roadmap
 

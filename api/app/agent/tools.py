@@ -92,6 +92,7 @@ def run_tool(name: str, args: dict, phone: str, channel: str, call_id: str | Non
     except Exception as e:  # tool errors go back to the model, never crash the call
         ok = False
         log.exception("tool %s failed", name)
-        return {"error": str(e)}
+        # The model may repeat this to the caller, so never pass internal details (URLs, stack text) through.
+        return {"error": "That didn't work on our side. Tell the caller a teammate will follow up."}
     finally:
         db.log_tool_event(call_id, name, int((time.perf_counter() - t0) * 1000), ok)

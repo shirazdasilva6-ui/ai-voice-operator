@@ -1,0 +1,6 @@
+# Secrets must never be baked into an image layer (Next.js also reads .env* files at build time).
+.env
+.env.*
+# Built inside the image; a host copy would be stale or platform-specific.
+node_modules
+.next
