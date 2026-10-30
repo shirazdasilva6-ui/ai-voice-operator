@@ -23,7 +23,8 @@ def checkout(body: dict):
         line_items=line_items,
         customer_email=body.get("email"),
         billing_address_collection="required",
-        metadata={"country": country, "business_name": body.get("business_name") or ""},
+        # Stripe caps metadata values at 500 chars; keep names sane well below that.
+        metadata={"country": country, "business_name": (body.get("business_name") or "")[:200]},
         success_url=f"{s.web_origin}/?billing=success",
         cancel_url=f"{s.web_origin}/?billing=cancel",
     )
@@ -35,6 +36,16 @@ def client_country(session: dict) -> str:
     meta = session.get("metadata") or {}
     address = (session.get("customer_details") or {}).get("address") or {}
     return (meta.get("country") or address.get("country") or "US").upper()
+
+
+# Delayed payment methods (bank debits) complete the checkout session *before* the money arrives,
+# then send async_payment_succeeded once it clears.
+PAYMENT_EVENTS = ("checkout.session.completed", "checkout.session.async_payment_succeeded")
+
+
+def should_provision(session: dict) -> bool:
+    """Provisioning buys Twilio numbers with real money, so only start once the client's payment has cleared."""
+    return session.get("payment_status") in ("paid", "no_payment_required")
 
 
 @router.post("/webhook")
@@ -49,7 +60,7 @@ async def stripe_webhook(request: Request, background: BackgroundTasks):
 
     obj = event["data"]["object"]
     with conn() as c:
-        if event["type"] == "checkout.session.completed":
+        if event["type"] in PAYMENT_EVENTS:
             details = obj.get("customer_details") or {}
             row = c.execute(
                 """insert into customers (email, stripe_customer_id, stripe_subscription_id, status, country, business_name)
@@ -63,7 +74,8 @@ async def stripe_webhook(request: Request, background: BackgroundTasks):
                 ),
             ).fetchone()
             # Stripe needs a 2xx fast; provisioning calls Twilio + Vapi + Resend so it runs after the response.
-            background.add_task(provision_customer, str(row["id"]))
+            if should_provision(obj):
+                background.add_task(provision_customer, str(row["id"]))
         elif event["type"] in ("customer.subscription.updated", "customer.subscription.deleted"):
             c.execute("update customers set status = %s where stripe_customer_id = %s", (obj["status"], obj["customer"]))
     return {"received": True}
