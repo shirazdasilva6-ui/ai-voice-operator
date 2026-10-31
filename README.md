@@ -1,5 +1,7 @@
 # AI Voice Operator
 
+[![ci](https://github.com/shirazdasilva6-ui/ai-voice-operator/actions/workflows/ci.yml/badge.svg)](https://github.com/shirazdasilva6-ui/ai-voice-operator/actions/workflows/ci.yml)
+
 **An AI receptionist that answers phone calls and WhatsApp messages, qualifies leads, books meetings in Calendly and logs everything in HubSpot, at a fraction of the cost of a human SDR.**
 
 > 🔴 **Live demo:** `https://<your-app>.vercel.app` · **Call it:** `+1 (XXX) XXX-XXXX` · **WhatsApp:** `+1 (XXX) XXX-XXXX`
