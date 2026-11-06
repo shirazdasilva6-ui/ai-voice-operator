@@ -35,7 +35,7 @@ Every number below comes from `GET /metrics`, which reads the `calls` and `tool_
 2. **Qualifies.** The LLM pulls out BANT signals (budget, authority, need, timeline) and calls `qualify_lead`. **The LLM extracts and deterministic code decides:** [`qualify.py`](api/app/agent/qualify.py) scores the lead 0–100 and is unit-tested.
 3. **Books.** Qualified leads get real open slots from the Calendly API. A single-use booking link goes out by SMS for voice callers or in the chat for WhatsApp.
 4. **Logs.** Every lead is upserted into HubSpot (search by phone, then create or patch) with `hs_lead_status` mapped from the pipeline state.
-5. **Bills.** The business owner subscribes through Stripe Checkout, and the webhook syncs subscription status.
+5. **Bills and onboards.** The business owner pays through Stripe Checkout. Once the payment has **cleared**, the client is set up with no manual steps: the API creates their Vapi assistant, buys a local Twilio number in their country, connects the two and emails onboarding instructions via Resend ([`provisioning.py`](api/app/provisioning.py)).
 6. **Reports.** A Next.js 16 dashboard shows volume, cost per call, latency, booking rate and recent calls (phone numbers masked).
 
 ## Architecture
@@ -59,17 +59,19 @@ flowchart LR
 ```
 ai-voice-operator/
 ├── docker-compose.yml
-├── supabase/migrations/001_init.sql
+├── supabase/migrations/      001_init.sql · 002_provisioning.sql
 ├── api/                      FastAPI
 │   ├── app/
 │   │   ├── main.py
-│   │   ├── config.py · db.py
+│   │   ├── config.py · db.py · security.py
+│   │   ├── provisioning.py   paid checkout → assistant + number + onboarding email
 │   │   ├── agent/            prompts · tools (shared registry) · chat (WhatsApp loop) · qualify (scoring)
 │   │   ├── integrations/     calendly · hubspot · twilio_client
 │   │   └── routes/           vapi · whatsapp · metrics · billing
-│   ├── scripts/simulate_calls.py
-│   └── tests/test_qualify.py
-└── web/                      Next.js 16 dashboard
+│   ├── scripts/              simulate_calls.py · provision.py
+│   └── tests/                qualify · security · provisioning · provisioning_db (real Postgres)
+├── web/                      Next.js 16 dashboard
+└── .github/                  CI workflow · Dependabot
 ```
 
 ### Design decisions
@@ -84,6 +86,9 @@ ai-voice-operator/
 | Tool errors are returned to the model, not raised | A failed HubSpot call doesn't hang up on a customer. |
 | Load-test calls are prefixed `sim-` and skip HubSpot and SMS | They never pollute the CRM, text fake numbers or mix with live metrics. |
 | Every integration runs in demo mode without keys | `docker-compose up` works with no accounts. |
+| Provisioning starts only when `payment_status` is `paid` | Bank debits complete checkout *before* the money arrives; numbers cost real money, so we wait for `async_payment_succeeded`. |
+| Each provisioning step is saved before the next, and a run older than 15 min can be reclaimed | A crash or restart resumes where it stopped instead of stranding a paying client. |
+| Purchased numbers are tagged `vo-<customer id>` in Twilio | A retry after a crash reuses the number instead of buying a second one. |
 
 ## Run it
 
@@ -95,6 +100,14 @@ docker-compose up --build
 docker-compose exec api python -m scripts.simulate_calls --n 800
 docker-compose exec api pytest -q
 ```
+
+**Database already exists?** Postgres only runs migrations when its volume is first created. After pulling a new migration, apply it yourself (each one is safe to re-run):
+
+```bash
+docker-compose exec db psql -U postgres operator -f /docker-entrypoint-initdb.d/002_provisioning.sql
+```
+
+> ⚠️ **Before deploying, run `supabase/migrations/002_provisioning.sql` on your Supabase database.** Without it, the first paid checkout fails.
 
 ### Try it by hand (be Vapi yourself)
 
@@ -129,11 +142,31 @@ Invoke-RestMethod -Method Post -Uri http://localhost:8000/vapi/webhook -ContentT
 ### Connect real phone and WhatsApp
 
 1. `ngrok http 8000`, then set `PUBLIC_BASE_URL` to the ngrok URL.
-2. **Vapi:** import your Twilio number and create the assistant from `curl localhost:8000/vapi/assistant-config`. Set the server secret to `VAPI_SECRET`.
+2. **Vapi:** import your Twilio number and create the assistant from `curl -H "Authorization: Bearer $DASHBOARD_TOKEN" localhost:8000/vapi/assistant-config` (the config contains your system prompt, so it's private). Set the server secret to `VAPI_SECRET`.
 3. **Twilio WhatsApp sandbox:** set "When a message comes in" to `<PUBLIC_BASE_URL>/whatsapp/webhook`.
 4. **Calendly:** personal access token plus `CALENDLY_EVENT_TYPE_URI`.
 5. **HubSpot:** private app with `crm.objects.contacts.read/write` scopes.
 6. **Stripe:** `stripe listen --forward-to localhost:8000/billing/webhook`.
+
+### Turn on automatic client setup
+
+Paid checkout → Vapi assistant + local Twilio number + onboarding email. Set these in `.env` (names match `.env.example`):
+
+| Variable | What it's for |
+|---|---|
+| `STRIPE_PRICE_IDS`, `STRIPE_SETUP_PRICE_IDS` | Monthly and one-off prices per country, as JSON: `{"US": "price_...", "GB": "price_..."}` |
+| `VAPI_API_KEY` | Creates each client's assistant and attaches their number |
+| `TWILIO_BUNDLE_SIDS`, `TWILIO_ADDRESS_SIDS` | Needed before Twilio will sell **GB/AU** numbers (regulatory approval) |
+| `RESEND_API_KEY`, `RESEND_FROM` | Onboarding emails (logged instead of sent when unset) |
+| `OPS_EMAIL` | Where "manual number needed" and failure alerts go |
+
+Supported countries: **US, GB, AU, AE.** AE local numbers usually can't be bought through the API, so those clients land in `needs_manual_number` and you get an email. Once you've attached a number by hand, finish their setup with:
+
+```bash
+docker-compose exec api python -m scripts.provision <customer_id>
+```
+
+> Each run buys a real phone number. Set a **billing limit in Twilio** before testing.
 
 ## Stack
 
