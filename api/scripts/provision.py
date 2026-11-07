@@ -8,6 +8,8 @@ from app.db import pool
 from app.provisioning import provision_customer
 
 if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        sys.exit("usage: python -m scripts.provision <customer_id>")
     pool.open(wait=True)
     provision_customer(sys.argv[1])
     pool.close()
