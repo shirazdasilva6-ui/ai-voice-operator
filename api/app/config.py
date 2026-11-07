@@ -59,8 +59,11 @@ def production_problems(s: Settings) -> list[str]:
     problems = [f"{name.upper()} is not set" for name in ("vapi_secret", "twilio_auth_token", "dashboard_token") if not getattr(s, name)]
     if not s.twilio_validate:
         problems.append("TWILIO_VALIDATE must be true")
-    if s.stripe_secret_key and not s.stripe_webhook_secret:
-        problems.append("STRIPE_WEBHOOK_SECRET is not set")
+    if s.stripe_secret_key:
+        # Every paid checkout triggers auto-provisioning. Without these, setup fails *after* the client has paid.
+        for name in ("stripe_webhook_secret", "vapi_api_key", "twilio_account_sid"):
+            if not getattr(s, name):
+                problems.append(f"{name.upper()} is not set (required when STRIPE_SECRET_KEY is)")
     return problems
 
 

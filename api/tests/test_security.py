@@ -30,6 +30,22 @@ def test_production_with_all_secrets_is_allowed():
     assert production_problems(s) == []
 
 
+ALL_SECRETS = dict(_env_file=None, app_env="production", vapi_secret="v", twilio_auth_token="t", dashboard_token="d")
+
+
+def test_taking_payments_requires_what_auto_setup_needs():
+    # Stripe on but no Vapi/Twilio account: clients could pay and then never get set up.
+    problems = production_problems(Settings(**ALL_SECRETS, stripe_secret_key="sk", vapi_api_key="", twilio_account_sid=""))
+    assert any(p.startswith("STRIPE_WEBHOOK_SECRET") for p in problems)
+    assert any(p.startswith("VAPI_API_KEY") for p in problems)
+    assert any(p.startswith("TWILIO_ACCOUNT_SID") for p in problems)
+
+
+def test_taking_payments_with_everything_configured_is_allowed():
+    s = Settings(**ALL_SECRETS, stripe_secret_key="sk", stripe_webhook_secret="wh", vapi_api_key="vk", twilio_account_sid="AC")
+    assert production_problems(s) == []
+
+
 def test_upsert_lead_rejects_unknown_columns():
     # Column names go into SQL text, so anything unexpected must be refused before reaching the DB.
     with pytest.raises(ValueError):
