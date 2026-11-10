@@ -1,3 +1,5 @@
+import json
+
 import stripe
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
@@ -51,13 +53,15 @@ def should_provision(session: dict) -> bool:
 @router.post("/webhook")
 async def stripe_webhook(request: Request, background: BackgroundTasks):
     s = get_settings()
+    payload = await request.body()
     try:
-        event = stripe.Webhook.construct_event(
-            await request.body(), request.headers.get("stripe-signature", ""), s.stripe_webhook_secret
-        )
+        stripe.Webhook.construct_event(payload, request.headers.get("stripe-signature", ""), s.stripe_webhook_secret)
     except (ValueError, stripe.SignatureVerificationError):
         raise HTTPException(400, "invalid signature")
 
+    # The signature is verified; now read the same bytes as plain JSON. stripe-python's objects stopped being
+    # dicts (no .get()), which made every real paid-checkout event crash this handler with a 500.
+    event = json.loads(payload)
     obj = event["data"]["object"]
     with conn() as c:
         if event["type"] in PAYMENT_EVENTS:
