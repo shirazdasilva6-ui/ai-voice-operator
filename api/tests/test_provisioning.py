@@ -3,7 +3,9 @@ from types import SimpleNamespace
 import pytest
 
 from app import provisioning as p
-from app.routes.billing import client_country, should_provision
+from fastapi import HTTPException
+
+from app.routes.billing import checkout, client_country, should_provision
 
 ROW = {
     "email": "owner@agency.co.uk", "business_name": "Acme Lettings", "country": "GB",
@@ -75,6 +77,12 @@ def test_client_country_prefers_metadata_then_billing_address():
     assert client_country({"metadata": {"country": "ae"}}) == "AE"
     assert client_country({"metadata": {}, "customer_details": {"address": {"country": "AU"}}}) == "AU"
     assert client_country({}) == "US"
+
+
+def test_checkout_rejects_country_we_cannot_provision():
+    with pytest.raises(HTTPException) as exc:
+        checkout({"email": "owner@agency.co.za", "country": "za"})
+    assert exc.value.status_code == 400
 
 
 def test_unsupported_country_is_not_bought():
