@@ -33,7 +33,7 @@ Every number below comes from `GET /metrics`, which reads the `calls` and `tool_
 2. **Qualifies.** The LLM pulls out BANT signals (budget, authority, need, timeline) and calls `qualify_lead`. **The LLM extracts and deterministic code decides:** [`qualify.py`](api/app/agent/qualify.py) scores the lead 0–100 and is unit-tested.
 3. **Books.** Qualified leads get real open slots from the Calendly API. A single-use booking link goes out by SMS for voice callers or in the chat for WhatsApp.
 4. **Logs.** Every lead is upserted into HubSpot (search by phone, then create or patch) with `hs_lead_status` mapped from the pipeline state.
-5. **Bills.** The business owner subscribes through Stripe Checkout, and the webhook syncs subscription status.
+5. **Bills and provisions.** The business owner pays through Stripe Checkout (monthly price plus an optional setup fee, priced per country). Once the payment has cleared, the webhook sets the client up with no manual steps: it creates their Vapi assistant, buys a local Twilio number in their country (US, GB, AE or AU), attaches it, and sends a Resend onboarding email. See [`provisioning.py`](api/app/provisioning.py).
 6. **Reports.** A Next.js 16 dashboard shows volume, cost per call, latency, booking rate and recent calls (phone numbers masked).
 
 ## Architecture
@@ -57,16 +57,16 @@ flowchart LR
 ```
 ai-voice-operator/
 ├── docker-compose.yml
-├── supabase/migrations/001_init.sql
+├── supabase/migrations/      001_init · 002_provisioning
 ├── api/                      FastAPI
 │   ├── app/
 │   │   ├── main.py
-│   │   ├── config.py · db.py
+│   │   ├── config.py · db.py · provisioning.py
 │   │   ├── agent/            prompts · tools (shared registry) · chat (WhatsApp loop) · qualify (scoring)
 │   │   ├── integrations/     calendly · hubspot · twilio_client
 │   │   └── routes/           vapi · whatsapp · metrics · billing
-│   ├── scripts/simulate_calls.py
-│   └── tests/test_qualify.py
+│   ├── scripts/              simulate_calls · provision (re-run one client)
+│   └── tests/                test_qualify · test_provisioning · test_provisioning_db · test_security
 └── web/                      Next.js 16 dashboard
 ```
 
@@ -82,6 +82,8 @@ ai-voice-operator/
 | Tool errors are returned to the model, not raised | A failed HubSpot call doesn't hang up on a customer. |
 | Load-test calls are prefixed `sim-` and skip HubSpot and SMS | They never pollute the CRM, text fake numbers or mix with live metrics. |
 | Every integration runs in demo mode without keys | `docker-compose up` works with no accounts. |
+| Provisioning saves each step before starting the next, behind an atomic claim | Stripe retries webhooks. A retry resumes where the last run stopped, so it never buys a second number or creates a second assistant. |
+| No number available? Mark `needs_manual_number`, email ops, still onboard the client | GB/AU numbers need an approved Twilio regulatory bundle, and AE numbers usually can't be bought by API. The client isn't left waiting in silence. |
 
 ## Run it
 
@@ -131,7 +133,14 @@ Invoke-RestMethod -Method Post -Uri http://localhost:8000/vapi/webhook -ContentT
 3. **Twilio WhatsApp sandbox:** set "When a message comes in" to `<PUBLIC_BASE_URL>/whatsapp/webhook`.
 4. **Calendly:** personal access token plus `CALENDLY_EVENT_TYPE_URI`.
 5. **HubSpot:** private app with `crm.objects.contacts.read/write` scopes.
-6. **Stripe:** `stripe listen --forward-to localhost:8000/billing/webhook`.
+6. **Stripe:** `stripe listen --forward-to localhost:8000/billing/webhook`. Set `STRIPE_PRICE_IDS` and `STRIPE_SETUP_PRICE_IDS` as JSON keyed by country.
+
+### Auto-provisioning
+
+1. Run `supabase/migrations/002_provisioning.sql`.
+2. Set `VAPI_API_KEY`, the Twilio keys, `RESEND_API_KEY`, `RESEND_FROM` and `OPS_EMAIL`. For GB/AU numbers, also set `TWILIO_BUNDLE_SIDS` and `TWILIO_ADDRESS_SIDS`.
+3. A paid checkout now provisions the client by itself. Check progress in `customers.provisioning_status`.
+4. If a client lands in `needs_manual_number`: buy a number by hand, set `customers.phone_number`, then run `docker-compose exec api python -m scripts.provision <customer_id>`.
 
 ## Stack
 
@@ -141,5 +150,6 @@ Next.js 16 · FastAPI · Postgres (Supabase in prod) · Twilio Voice / SMS / Wha
 
 - [ ] Stripe metered billing per voice minute (Billing Meter events)
 - [ ] Warm transfer to a human when the score is 80+ and it's business hours
-- [ ] Multi-tenant: one assistant per customer with row-level security
+- [x] One assistant and number per customer, provisioned on checkout
+- [ ] Multi-tenant data: split calls, Calendly and HubSpot per customer (the webhook URL already carries `?customer=`), with row-level security
 - [ ] Async WhatsApp replies via the REST API (Twilio's webhook timeout is 15s)
