@@ -1,21 +1,10 @@
 """claim() is SQL, so test it against real Postgres. Skips when no database is reachable (e.g. CI without one)."""
 import uuid
 
-import pytest
-from psycopg_pool import PoolTimeout
-
 from app import provisioning as p
-from app.db import conn, pool
+from app.db import conn
 
-
-@pytest.fixture(scope="module")
-def db():
-    try:
-        pool.open(wait=True, timeout=3)
-    except PoolTimeout:
-        pytest.skip("no database available")
-    yield
-    pool.close()
+# The `db` fixture (shared Postgres pool) lives in conftest.py.
 
 
 def _customer(status: str, started_minutes_ago: int | None) -> str:
