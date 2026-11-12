@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.15-slim
 WORKDIR /srv
 # The base image's pip lags behind and carries its own advisories (pip-audit).
 RUN pip install --no-cache-dir --upgrade pip
