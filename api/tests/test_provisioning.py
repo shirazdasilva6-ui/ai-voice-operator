@@ -129,6 +129,52 @@ def test_onboarding_email_escapes_client_supplied_name():
     assert "<img" not in out and "&lt;img" in out
 
 
+LIVE_ROW = {"provisioning_status": "live", "vapi_phone_number_id": "pn_1", "twilio_number_sid": "PN123",
+            "vapi_assistant_id": "asst_1"}
+
+
+@pytest.fixture
+def teardown(monkeypatch):
+    calls = {"deleted": [], "released": [], "saved": {}, "emails": []}
+    monkeypatch.setattr(p, "load_customer", lambda cid: dict(LIVE_ROW))
+    monkeypatch.setattr(p, "save", lambda cid, **f: calls["saved"].update(f))
+    monkeypatch.setattr(p, "vapi_delete", lambda path: calls["deleted"].append(path))
+    monkeypatch.setattr(p, "release_number", lambda sid: calls["released"].append(sid))
+    monkeypatch.setattr(p, "send_email", lambda to, subj, html: calls["emails"].append(subj))
+    return calls
+
+
+def test_deprovision_releases_number_and_vapi_resources(teardown):
+    p.deprovision_customer("cust-1")
+    assert teardown["released"] == ["PN123"]
+    assert teardown["deleted"] == ["/phone-number/pn_1", "/assistant/asst_1"]
+    assert teardown["saved"]["provisioning_status"] == "cancelled"
+    assert teardown["saved"]["twilio_number_sid"] is None
+
+
+def test_deprovision_is_a_no_op_once_cancelled(teardown, monkeypatch):
+    monkeypatch.setattr(p, "load_customer", lambda cid: {**LIVE_ROW, "provisioning_status": "cancelled"})
+    p.deprovision_customer("cust-1")
+    assert teardown["released"] == [] and teardown["deleted"] == []
+
+
+def test_deprovision_retry_skips_already_released_parts(teardown, monkeypatch):
+    monkeypatch.setattr(p, "load_customer", lambda cid: {**LIVE_ROW, "vapi_phone_number_id": None, "twilio_number_sid": None})
+    p.deprovision_customer("cust-1")
+    assert teardown["released"] == []
+    assert teardown["deleted"] == ["/assistant/asst_1"]
+
+
+def test_deprovision_failure_keeps_status_and_records_error(teardown, monkeypatch):
+    def boom(sid):
+        raise RuntimeError("twilio 500")
+
+    monkeypatch.setattr(p, "release_number", boom)
+    p.deprovision_customer("cust-1")
+    assert "provisioning_status" not in teardown["saved"]  # still 'live', so a retry will try again
+    assert "twilio 500" in teardown["saved"]["provisioning_error"]
+
+
 def test_save_rejects_unknown_columns():
     with pytest.raises(ValueError):
         p.save("cust-1", **{"status; drop table customers": "x"})

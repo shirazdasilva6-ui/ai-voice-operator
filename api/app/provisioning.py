@@ -96,6 +96,17 @@ def vapi_post(path: str, body: dict) -> dict:
     return r.json()
 
 
+def vapi_delete(path: str) -> None:
+    r = httpx.delete(f"{VAPI}{path}", headers={"Authorization": f"Bearer {get_settings().vapi_api_key}"}, timeout=30)
+    if r.status_code != 404:  # already gone counts as done
+        r.raise_for_status()
+
+
+def release_number(twilio_sid: str) -> None:
+    s = get_settings()
+    Client(s.twilio_account_sid, s.twilio_auth_token).incoming_phone_numbers(twilio_sid).delete()
+
+
 def send_email(to: str, subject: str, html: str) -> None:
     s = get_settings()
     if not s.resend_api_key:
@@ -172,3 +183,35 @@ def provision_customer(customer_id: str) -> None:
         save(customer_id, provisioning_status="failed", provisioning_error=str(e)[:500])
         if s.ops_email:
             send_email(s.ops_email, f"Provisioning FAILED: {business}", f"<pre>{html.escape(str(e))}</pre>")
+
+
+def load_customer(customer_id: str) -> dict | None:
+    with conn() as c:
+        return c.execute("select * from customers where id = %s", (customer_id,)).fetchone()
+
+
+def deprovision_customer(customer_id: str) -> None:
+    """Subscription ended: stop paying for the client's number and remove their Vapi resources.
+
+    Each resource is cleared on the row as soon as it is released, so a retry only touches what is left.
+    """
+    row = load_customer(customer_id)
+    if row is None or row["provisioning_status"] == "cancelled":
+        return
+    try:
+        if row["vapi_phone_number_id"]:
+            vapi_delete(f"/phone-number/{row['vapi_phone_number_id']}")
+            save(customer_id, vapi_phone_number_id=None)
+        if row["twilio_number_sid"]:
+            release_number(row["twilio_number_sid"])
+            save(customer_id, twilio_number_sid=None, phone_number=None)
+        if row["vapi_assistant_id"]:
+            vapi_delete(f"/assistant/{row['vapi_assistant_id']}")
+            save(customer_id, vapi_assistant_id=None)
+        save(customer_id, provisioning_status="cancelled", provisioning_error=None)
+    except Exception as e:
+        log.exception("deprovisioning failed for customer %s", customer_id)
+        save(customer_id, provisioning_error=f"deprovision: {e}"[:500])
+        s = get_settings()
+        if s.ops_email:
+            send_email(s.ops_email, f"Deprovisioning FAILED: {customer_id}", f"<pre>{html.escape(str(e))}</pre>")
