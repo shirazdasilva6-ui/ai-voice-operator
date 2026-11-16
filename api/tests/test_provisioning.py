@@ -3,7 +3,9 @@ from types import SimpleNamespace
 import pytest
 
 from app import provisioning as p
-from app.routes.billing import client_country, should_provision
+from fastapi import HTTPException
+
+from app.routes.billing import checkout, client_country, should_provision
 
 ROW = {
     "email": "owner@agency.co.uk", "business_name": "Acme Lettings", "country": "GB",
@@ -77,6 +79,12 @@ def test_client_country_prefers_metadata_then_billing_address():
     assert client_country({}) == "US"
 
 
+def test_checkout_rejects_country_we_cannot_provision():
+    with pytest.raises(HTTPException) as exc:
+        checkout({"email": "owner@agency.co.za", "country": "za"})
+    assert exc.value.status_code == 400
+
+
 def test_unsupported_country_is_not_bought():
     with pytest.raises(p.NumberUnavailable):
         p.buy_number("ZA", "cust-1")
@@ -119,6 +127,67 @@ def test_new_number_is_tagged_with_customer_id(monkeypatch):
 def test_onboarding_email_escapes_client_supplied_name():
     out = p.onboarding_html('<img src=x onerror="alert(1)">', "+15550001111")
     assert "<img" not in out and "&lt;img" in out
+
+
+def test_order_without_email_still_goes_live_and_ops_gets_the_onboarding(fake, monkeypatch):
+    from app.config import get_settings
+
+    monkeypatch.setattr(p, "claim", lambda cid: {**ROW, "email": None})
+    monkeypatch.setenv("OPS_EMAIL", "ops@example.com")
+    get_settings.cache_clear()
+    try:
+        p.provision_customer("cust-1")
+    finally:
+        get_settings.cache_clear()
+    assert fake["saved"]["provisioning_status"] == "live"
+    assert fake["emails"][0][0] == "ops@example.com"
+    assert "forward by hand" in fake["emails"][0][1]
+
+
+LIVE_ROW = {"provisioning_status": "live", "vapi_phone_number_id": "pn_1", "twilio_number_sid": "PN123",
+            "vapi_assistant_id": "asst_1"}
+
+
+@pytest.fixture
+def teardown(monkeypatch):
+    calls = {"deleted": [], "released": [], "saved": {}, "emails": []}
+    monkeypatch.setattr(p, "load_customer", lambda cid: dict(LIVE_ROW))
+    monkeypatch.setattr(p, "save", lambda cid, **f: calls["saved"].update(f))
+    monkeypatch.setattr(p, "vapi_delete", lambda path: calls["deleted"].append(path))
+    monkeypatch.setattr(p, "release_number", lambda sid: calls["released"].append(sid))
+    monkeypatch.setattr(p, "send_email", lambda to, subj, html: calls["emails"].append(subj))
+    return calls
+
+
+def test_deprovision_releases_number_and_vapi_resources(teardown):
+    p.deprovision_customer("cust-1")
+    assert teardown["released"] == ["PN123"]
+    assert teardown["deleted"] == ["/phone-number/pn_1", "/assistant/asst_1"]
+    assert teardown["saved"]["provisioning_status"] == "cancelled"
+    assert teardown["saved"]["twilio_number_sid"] is None
+
+
+def test_deprovision_is_a_no_op_once_cancelled(teardown, monkeypatch):
+    monkeypatch.setattr(p, "load_customer", lambda cid: {**LIVE_ROW, "provisioning_status": "cancelled"})
+    p.deprovision_customer("cust-1")
+    assert teardown["released"] == [] and teardown["deleted"] == []
+
+
+def test_deprovision_retry_skips_already_released_parts(teardown, monkeypatch):
+    monkeypatch.setattr(p, "load_customer", lambda cid: {**LIVE_ROW, "vapi_phone_number_id": None, "twilio_number_sid": None})
+    p.deprovision_customer("cust-1")
+    assert teardown["released"] == []
+    assert teardown["deleted"] == ["/assistant/asst_1"]
+
+
+def test_deprovision_failure_keeps_status_and_records_error(teardown, monkeypatch):
+    def boom(sid):
+        raise RuntimeError("twilio 500")
+
+    monkeypatch.setattr(p, "release_number", boom)
+    p.deprovision_customer("cust-1")
+    assert "provisioning_status" not in teardown["saved"]  # still 'live', so a retry will try again
+    assert "twilio 500" in teardown["saved"]["provisioning_error"]
 
 
 def test_save_rejects_unknown_columns():

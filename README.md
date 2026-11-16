@@ -89,6 +89,8 @@ ai-voice-operator/
 | Provisioning starts only when `payment_status` is `paid` | Bank debits complete checkout *before* the money arrives; numbers cost real money, so we wait for `async_payment_succeeded`. |
 | Each provisioning step is saved before the next, and a run older than 15 min can be reclaimed | A crash or restart resumes where it stopped instead of stranding a paying client. |
 | Purchased numbers are tagged `vo-<customer id>` in Twilio | A retry after a crash reuses the number instead of buying a second one. |
+| Release the number only on `customer.subscription.deleted` | A churned client's number would otherwise bill every month. `subscription.updated` (including a pending cancel) leaves them live until their paid period actually ends. |
+| `/ready` checks the database, `/health` doesn't | Monitors watch `/ready`, so a dead database pages you. `/health` stays a cheap "process is up" check. |
 
 ## Run it
 
@@ -168,6 +170,12 @@ docker-compose exec api python -m scripts.provision <customer_id>
 
 > Each run buys a real phone number. Set a **billing limit in Twilio** before testing.
 
+**When things don't go to plan:**
+
+- **No email on the checkout:** the client still goes live, and the onboarding email goes to `OPS_EMAIL` to forward by hand.
+- **Subscription ends:** the client's Vapi number and assistant are deleted and the Twilio number is released (`provisioning_status = cancelled`). If that fails, the row keeps its status, `provisioning_error` says why, and ops is emailed.
+- **Monitoring:** point uptime checks at `GET /ready`, which returns 503 when the database is unreachable. `/health` only proves the process is up.
+
 ## Stack
 
 Next.js 16 · FastAPI · Postgres (Supabase in prod) · Twilio Voice / SMS / WhatsApp · Vapi · Claude tool use · Calendly API · HubSpot CRM API · Stripe Billing · Docker
@@ -176,5 +184,6 @@ Next.js 16 · FastAPI · Postgres (Supabase in prod) · Twilio Voice / SMS / Wha
 
 - [ ] Stripe metered billing per voice minute (Billing Meter events)
 - [ ] Warm transfer to a human when the score is 80+ and it's business hours
-- [ ] Multi-tenant: one assistant per customer with row-level security
+- [x] One assistant and number per customer, provisioned on checkout and released on cancellation
+- [ ] Multi-tenant data: split calls, Calendly and HubSpot per customer (the webhook URL already carries `?customer=`), with row-level security
 - [ ] Async WhatsApp replies via the REST API (Twilio's webhook timeout is 15s)
