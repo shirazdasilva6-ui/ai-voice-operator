@@ -190,53 +190,6 @@ def test_deprovision_failure_keeps_status_and_records_error(teardown, monkeypatc
     assert "twilio 500" in teardown["saved"]["provisioning_error"]
 
 
-@pytest.fixture
-def webhook(monkeypatch):
-    """POST a Stripe event to /billing/webhook with signature checking and the DB faked out."""
-    from contextlib import contextmanager
-
-    from fastapi.testclient import TestClient
-
-    from app.main import app
-    from app.routes import billing
-
-    scheduled = []
-
-    class FakeCursor:
-        def fetchone(self):
-            return {"id": "cust-1"}
-
-    class FakeConn:
-        def execute(self, sql, params):
-            return FakeCursor()
-
-    @contextmanager
-    def fake_conn():
-        yield FakeConn()
-
-    monkeypatch.setattr(billing, "conn", fake_conn)
-    monkeypatch.setattr(billing, "deprovision_customer", lambda cid: scheduled.append(("deprovision", cid)))
-    monkeypatch.setattr(billing, "provision_customer", lambda cid: scheduled.append(("provision", cid)))
-    client = TestClient(app)  # no `with`: skips lifespan, so no DB pool is opened
-
-    def send(event_type, obj):
-        monkeypatch.setattr(billing.stripe.Webhook, "construct_event",
-                            lambda body, sig, secret: {"type": event_type, "data": {"object": obj}})
-        assert client.post("/billing/webhook", content=b"{}").status_code == 200
-        return scheduled
-
-    return send
-
-
-def test_ended_subscription_schedules_deprovisioning(webhook):
-    assert webhook("customer.subscription.deleted", {"status": "canceled", "customer": "cus_1"}) == [("deprovision", "cust-1")]
-
-
-def test_subscription_update_does_not_deprovision(webhook):
-    # e.g. cancel_at_period_end=true: still paid up until the period ends, so keep the number.
-    assert webhook("customer.subscription.updated", {"status": "active", "customer": "cus_1"}) == []
-
-
 def test_save_rejects_unknown_columns():
     with pytest.raises(ValueError):
         p.save("cust-1", **{"status; drop table customers": "x"})

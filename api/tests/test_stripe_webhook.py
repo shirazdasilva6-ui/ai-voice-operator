@@ -48,6 +48,7 @@ def client(monkeypatch):
 
     monkeypatch.setattr(billing, "conn", fake_conn)
     monkeypatch.setattr(billing, "provision_customer", lambda cid: provisioned.append(cid))
+    monkeypatch.setattr(billing, "deprovision_customer", lambda cid: provisioned.append(("deprovision", cid)))
     from app.main import app
 
     yield TestClient(app), provisioned, sql
@@ -96,3 +97,25 @@ def test_unpaid_checkout_is_recorded_but_not_provisioned(client):
     assert r.status_code == 200
     assert any("insert into customers" in q for q in sql)  # customer saved...
     assert provisioned == []  # ...but no money spent on numbers yet
+
+
+def subscription_event(event_type: str, status: str) -> str:
+    return json.dumps({
+        "id": "evt_2", "object": "event", "type": event_type,
+        "data": {"object": {"id": "sub_1", "object": "subscription", "customer": "cus_1", "status": status}},
+    })
+
+
+def test_ended_subscription_releases_the_clients_number(client):
+    c, provisioned, _ = client
+    body = subscription_event("customer.subscription.deleted", "canceled")
+    r = c.post("/billing/webhook", content=body, headers={"stripe-signature": stripe_signature(body)})
+    assert r.status_code == 200 and provisioned == [("deprovision", "cust-1")]
+
+
+def test_pending_cancellation_keeps_the_client_live(client):
+    c, provisioned, _ = client
+    # cancel_at_period_end=true arrives as subscription.updated: still paid up, so keep the number.
+    body = subscription_event("customer.subscription.updated", "active")
+    r = c.post("/billing/webhook", content=body, headers={"stripe-signature": stripe_signature(body)})
+    assert r.status_code == 200 and provisioned == []
