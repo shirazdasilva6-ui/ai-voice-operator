@@ -129,6 +129,21 @@ def test_onboarding_email_escapes_client_supplied_name():
     assert "<img" not in out and "&lt;img" in out
 
 
+def test_order_without_email_still_goes_live_and_ops_gets_the_onboarding(fake, monkeypatch):
+    from app.config import get_settings
+
+    monkeypatch.setattr(p, "claim", lambda cid: {**ROW, "email": None})
+    monkeypatch.setenv("OPS_EMAIL", "ops@example.com")
+    get_settings.cache_clear()
+    try:
+        p.provision_customer("cust-1")
+    finally:
+        get_settings.cache_clear()
+    assert fake["saved"]["provisioning_status"] == "live"
+    assert fake["emails"][0][0] == "ops@example.com"
+    assert "forward by hand" in fake["emails"][0][1]
+
+
 LIVE_ROW = {"provisioning_status": "live", "vapi_phone_number_id": "pn_1", "twilio_number_sid": "PN123",
             "vapi_assistant_id": "asst_1"}
 
