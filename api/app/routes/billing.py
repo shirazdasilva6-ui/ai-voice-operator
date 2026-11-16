@@ -5,7 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from ..config import get_settings
 from ..db import conn
-from ..provisioning import SUPPORTED, provision_customer
+from ..provisioning import SUPPORTED, deprovision_customer, provision_customer
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -84,5 +84,11 @@ async def stripe_webhook(request: Request, background: BackgroundTasks):
             if should_provision(obj):
                 background.add_task(provision_customer, str(row["id"]))
         elif event["type"] in ("customer.subscription.updated", "customer.subscription.deleted"):
-            c.execute("update customers set status = %s where stripe_customer_id = %s", (obj["status"], obj["customer"]))
+            row = c.execute(
+                "update customers set status = %s where stripe_customer_id = %s returning id",
+                (obj["status"], obj["customer"]),
+            ).fetchone()
+            # deleted = the subscription has actually ended (not just scheduled to cancel), so stop paying for the number.
+            if event["type"] == "customer.subscription.deleted" and row:
+                background.add_task(deprovision_customer, str(row["id"]))
     return {"received": True}
