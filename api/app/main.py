@@ -3,9 +3,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .config import get_settings, production_problems
-from .db import pool
+from .db import conn, pool
 from .routes import billing, metrics, vapi, whatsapp
 
 logging.basicConfig(level=logging.INFO)
@@ -32,4 +33,17 @@ for r in (vapi.router, whatsapp.router, metrics.router, billing.router):
 
 @app.get("/health")
 def health():
+    """Liveness: the process is up. Says nothing about dependencies."""
     return {"ok": True}
+
+
+@app.get("/ready")
+def ready():
+    """Readiness: the database answers. Point uptime monitors and load balancers here, not at /health."""
+    try:
+        with conn() as c:
+            c.execute("select 1")
+    except Exception:
+        logging.getLogger(__name__).exception("readiness check: database unreachable")
+        return JSONResponse({"ok": False, "database": "unreachable"}, status_code=503)
+    return {"ok": True, "database": "ok"}
