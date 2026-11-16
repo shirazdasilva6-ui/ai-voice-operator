@@ -121,6 +121,17 @@ def send_email(to: str, subject: str, html: str) -> None:
     r.raise_for_status()
 
 
+def email_client(row: dict, subject: str, body: str) -> None:
+    """Stripe doesn't guarantee an email on the session. Without one, hand the email to ops instead of failing the run."""
+    if row["email"]:
+        send_email(row["email"], subject, body)
+        return
+    log.warning("customer %s has no email; onboarding email goes to ops", row.get("id"))
+    s = get_settings()
+    if s.ops_email:
+        send_email(s.ops_email, f"[no client email, forward by hand] {subject}", body)
+
+
 def onboarding_html(business: str, number: str | None) -> str:
     # business_name is typed by the client at checkout: escape it, or it becomes HTML in our own emails.
     business = html.escape(business)
@@ -159,7 +170,7 @@ def provision_customer(customer_id: str) -> None:
                 save(customer_id, provisioning_status="needs_manual_number", provisioning_error=str(e))
                 if s.ops_email:
                     send_email(s.ops_email, f"Manual number needed: {business} ({country})", f"<p>{html.escape(str(e))}</p>")
-                send_email(row["email"], f"Welcome to Voice Operator, {business}", onboarding_html(business, None))
+                email_client(row, f"Welcome to Voice Operator, {business}", onboarding_html(business, None))
                 return
 
         if not row["vapi_phone_number_id"]:
@@ -176,7 +187,7 @@ def provision_customer(customer_id: str) -> None:
             )
             save(customer_id, vapi_phone_number_id=pn["id"])
 
-        send_email(row["email"], f"Your AI receptionist is live, {business}", onboarding_html(business, number))
+        email_client(row, f"Your AI receptionist is live, {business}", onboarding_html(business, number))
         save(customer_id, provisioning_status="live")
     except Exception as e:
         log.exception("provisioning failed for customer %s", customer_id)
