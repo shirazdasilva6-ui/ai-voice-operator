@@ -84,6 +84,8 @@ ai-voice-operator/
 | Every integration runs in demo mode without keys | `docker-compose up` works with no accounts. |
 | Provisioning saves each step before starting the next, behind an atomic claim | Stripe retries webhooks. A retry resumes where the last run stopped, so it never buys a second number or creates a second assistant. |
 | No number available? Mark `needs_manual_number`, email ops, still onboard the client | GB/AU numbers need an approved Twilio regulatory bundle, and AE numbers usually can't be bought by API. The client isn't left waiting in silence. |
+| Release the number only on `customer.subscription.deleted` | A churned client's number would otherwise bill every month. `subscription.updated` (including a pending cancel) leaves them live until their paid period actually ends. |
+| `/ready` checks the database, `/health` doesn't | Monitors watch `/ready`, so a dead database pages you. `/health` stays a cheap "process is up" check. |
 
 ## Run it
 
@@ -141,6 +143,10 @@ Invoke-RestMethod -Method Post -Uri http://localhost:8000/vapi/webhook -ContentT
 2. Set `VAPI_API_KEY`, the Twilio keys, `RESEND_API_KEY`, `RESEND_FROM` and `OPS_EMAIL`. For GB/AU numbers, also set `TWILIO_BUNDLE_SIDS` and `TWILIO_ADDRESS_SIDS`.
 3. A paid checkout now provisions the client by itself. Check progress in `customers.provisioning_status`.
 4. If a client lands in `needs_manual_number`: buy a number by hand, set `customers.phone_number`, then run `docker-compose exec api python -m scripts.provision <customer_id>`.
+5. If the checkout had no email, the client still goes live and the onboarding email goes to `OPS_EMAIL` to forward by hand.
+6. When a subscription ends, the client's Vapi number and assistant are deleted and the Twilio number is released (`provisioning_status = cancelled`). If that fails, the row keeps its status, `provisioning_error` says why, and ops is emailed.
+
+In production (`APP_ENV=production`), the API refuses to start if Stripe is configured without `VAPI_API_KEY`, because paid clients couldn't be provisioned. Point uptime monitoring at `GET /ready`, which returns 503 when the database is unreachable.
 
 ## Stack
 
@@ -150,6 +156,6 @@ Next.js 16 · FastAPI · Postgres (Supabase in prod) · Twilio Voice / SMS / Wha
 
 - [ ] Stripe metered billing per voice minute (Billing Meter events)
 - [ ] Warm transfer to a human when the score is 80+ and it's business hours
-- [x] One assistant and number per customer, provisioned on checkout
+- [x] One assistant and number per customer, provisioned on checkout and released on cancellation
 - [ ] Multi-tenant data: split calls, Calendly and HubSpot per customer (the webhook URL already carries `?customer=`), with row-level security
 - [ ] Async WhatsApp replies via the REST API (Twilio's webhook timeout is 15s)
