@@ -30,6 +30,13 @@ def test_production_with_all_secrets_is_allowed():
     assert production_problems(s) == []
 
 
+def test_production_with_stripe_needs_vapi_key_to_provision():
+    base = dict(_env_file=None, app_env="production", vapi_secret="v", twilio_auth_token="t", dashboard_token="d",
+                stripe_secret_key="sk_live_x", stripe_webhook_secret="whsec_x")
+    assert any("VAPI_API_KEY" in p for p in production_problems(Settings(**base, vapi_api_key="")))
+    assert production_problems(Settings(**base, vapi_api_key="vapi_x")) == []
+
+
 def test_upsert_lead_rejects_unknown_columns():
     # Column names go into SQL text, so anything unexpected must be refused before reaching the DB.
     with pytest.raises(ValueError):

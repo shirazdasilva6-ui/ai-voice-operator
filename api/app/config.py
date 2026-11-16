@@ -61,6 +61,9 @@ def production_problems(s: Settings) -> list[str]:
         problems.append("TWILIO_VALIDATE must be true")
     if s.stripe_secret_key and not s.stripe_webhook_secret:
         problems.append("STRIPE_WEBHOOK_SECRET is not set")
+    if s.stripe_secret_key and not s.vapi_api_key:
+        # Checkout would take the client's money, then provisioning would fail creating their assistant.
+        problems.append("VAPI_API_KEY is not set (paid checkouts could not be provisioned)")
     return problems
 
 
